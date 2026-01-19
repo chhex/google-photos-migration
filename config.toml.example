@@ -1,0 +1,30 @@
+# Google Photos to Apple Photos Migration Configuration
+# Copy this file to config.toml and adjust the paths to your setup
+
+[paths]
+# Directory containing your Google Takeout ZIP files
+takeout_zip_dir = "/path/to/your/takeout/zips"
+
+# Working directory for extracted files (needs ~1x space of ZIPs)
+work_dir = "/path/to/working/directory"
+
+# Output directory for processed photos ready for import (needs ~1x space of ZIPs)
+output_dir = "/path/to/output/directory"
+
+[import]
+# Delete files from output_dir after successful import to Apple Photos
+delete_after_import = true
+
+# Dry run mode - if true, no actual changes are made
+dry_run = false
+
+# Only process specific albums (empty = all albums)
+# Example: album_filter = ["Vacation 2023", "Family"]
+album_filter = []
+
+[extensions]
+# Supported image file extensions
+image = [".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"]
+
+# Supported video file extensions
+video = [".mp4", ".mov", ".avi", ".mkv", ".m4v"]
