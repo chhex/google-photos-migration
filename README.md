@@ -34,8 +34,6 @@ During the import with [osxphotos](https://github.com/RhetTbull/osxphotos), Appl
 
 The option for copying items into the Apple Photos library must be enabled.
 
-![1768864128439](image/README/1768864128439.png)
-
 After longer batch runs it may be necessary to restart Apple Photos, otherwise unexpected errors may occur.
 
 ### Platform
