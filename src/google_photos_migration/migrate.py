@@ -22,16 +22,17 @@ Voraussetzungen:
 Authors: Che, Claude
 """
 
-import os
 import sys
 import json
 import zipfile
 import subprocess
 import shutil
 import csv
-import tomllib  
+import tomllib
+import re
+import psutil
+from datetime import datetime, timedelta
 from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -119,6 +120,94 @@ class ImportStats:
 
 
 # =============================================================================
+# HEALTH CHECK FOR APPLE PHOTOS SANITY
+# =============================================================================
+
+
+def get_photos_errors(since_minutes: int = 5) -> int:
+    """
+    Zählt photolibraryd-Fehler in den System Logs.
+    """
+    since = (datetime.now() - timedelta(minutes=since_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    
+    cmd = [
+        "log", "show",
+        "--predicate", 'process == "photolibraryd"',
+        "--start", since,
+        "--style", "compact"
+    ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    
+    error_lines = [l for l in result.stdout.split('\n') 
+                   if ' E ' in l or ' F ' in l or 'error' in l.lower() or 'fail' in l.lower()]
+    
+    return len(error_lines)
+
+
+def check_photos_health(max_memory_gb: float = 3.0, max_errors: int = 5) -> tuple[bool, str]:
+    """
+    Prüft ob Apple Photos noch gesund ist.
+    """
+    for proc in psutil.process_iter(['name', 'memory_info']):
+        if proc.info['name'] == 'Photos':
+            memory_gb = proc.info['memory_info'].rss / (1024 ** 3)
+            
+            if memory_gb > max_memory_gb:
+                return False, f"Memory zu hoch: {memory_gb:.1f} GB"
+            
+            error_count = get_photos_errors(since_minutes=5)
+            if error_count > max_errors:
+                return False, f"Zu viele Fehler: {error_count}"
+            
+            return True, f"OK (Mem: {memory_gb:.1f} GB, Errors: {error_count})"
+    
+    return False, "Photos läuft nicht"
+
+
+def restart_photos():
+    """Beendet und startet Photos neu."""
+    import time
+    
+    log("Photos wird neugestartet...", "WARN")
+    subprocess.run(["osascript", "-e", 'quit app "Photos"'])
+    time.sleep(5)
+    subprocess.run(["open", "-a", "Photos"])
+    time.sleep(10)
+    log("Photos neugestartet", "OK")
+
+def handle_health_failure(reason: str, action: str) -> bool:
+    """
+    Reagiert auf Health-Probleme.
+    
+    Returns: True wenn weiterfahren, False wenn abbrechen
+    """
+    if action == "restart":
+        log(f"Health Check fehlgeschlagen: {reason}", "WARN")
+        restart_photos()
+        return True
+        
+    elif action == "terminate":
+        log(f"Health Check fehlgeschlagen: {reason}", "ERR")
+        log("Abbruch - bitte Photos manuell neustarten und Skript erneut ausführen", "ERR")
+        return False
+        
+    elif action == "manual":
+        log(f"Health Check fehlgeschlagen: {reason}", "WARN")
+        response = input("Weiterfahren? (j=ja, r=restart Photos, n=abbrechen): ").strip().lower()
+        
+        if response == 'j':
+            return True
+        elif response == 'r':
+            restart_photos()
+            return True
+        else:
+            log("Abbruch durch Benutzer", "INFO")
+            return False
+    
+    return False
+
+# =============================================================================
 # HILFSFUNKTIONEN
 # =============================================================================
 
@@ -178,6 +267,35 @@ def save_report(stats: ImportStats, report_path: Path):
                 result.error_message or ''
             ])
     log(f"Report gespeichert: {report_path}", "OK")
+
+
+def sanitize_album_name(name: str) -> str:
+    """
+    Bereinigt Albumnamen von problematischen Sonderzeichen.
+    """
+    # Zeichen die Probleme machen können
+    replacements = {
+        ",": " -",
+        "/": "-",
+        "\\": "-",
+        ":": " -",
+        '"': "'",
+        "<": "",
+        ">": "",
+        "|": "-",
+        "?": "",
+        "*": "",
+    }
+    
+    for char, replacement in replacements.items():
+        name = name.replace(char, replacement)
+    
+    # Mehrfache Leerzeichen/Bindestriche aufräumen
+    name = re.sub(r'\s+', ' ', name)        # Mehrfache Spaces → ein Space
+    name = re.sub(r'-+', '-', name)          # Mehrfache Bindestriche → einer
+    name = re.sub(r'\s*-\s*', ' - ', name)   # " - " normalisieren
+    
+    return name.strip()
 
 
 # =============================================================================
@@ -329,7 +447,7 @@ def apply_metadata_with_exiftool(media_path: Path, metadata: dict) -> bool:
 def process_single_album(album_dir: Path) -> dict:
     """Verarbeitet ein einzelnes Album (Ordner)."""
     stats = {'total': 0, 'processed': 0, 'skipped': 0, 'errors': 0}
-    album_name = album_dir.name
+    album_name = sanitize_album_name(album_dir.name)
     
     if ALBUM_FILTER and album_name not in ALBUM_FILTER:
         return stats
@@ -415,13 +533,7 @@ def process_all_albums():
 # =============================================================================
 
 def import_album_to_photos(album_dir: Path, stats: ImportStats) -> None:
-    """
-    Importiert ein einzelnes Album in Apple Photos.
-    
-    Verwendet osxphotos mit --skip-dups und verarbeitet jede Datei einzeln
-    für bessere Fehlerbehandlung.
-    """
-    album_name = album_dir.name
+    album_name = sanitize_album_name(album_dir.name)
     
     media_files = [f for f in album_dir.iterdir() 
                    if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS]
@@ -430,10 +542,26 @@ def import_album_to_photos(album_dir: Path, stats: ImportStats) -> None:
         return
     
     log(f"  Importiere {len(media_files)} Dateien in Album '{album_name}'...")
-    
-    for media_file in media_files:
+
+    health_check_interval = config["monitoring"]["health_check_interval"]
+    max_memory = config["monitoring"]["max_photos_memory_gb"]
+    max_errors = config["monitoring"]["max_errors_per_interval"]
+
+    for i, media_file in enumerate(media_files):
+        # Health Check alle X Dateien
+        if i > 0 and i % health_check_interval == 0:
+            is_healthy, reason = check_photos_health(max_memory, max_errors)
+            log(f"  Health Check: {reason}", "INFO")
+
+            if not is_healthy:
+                action = config["monitoring"]["on_health_failure"]
+                if not handle_health_failure(reason, action):
+                    return  # Import abbrechen
+        
         result = import_single_file(media_file, album_name)
         stats.add_result(result)
+        
+        # ... rest wie vorher (delete after import etc.)
         
         # Bei Erfolg und DELETE_AFTER_IMPORT: Datei löschen
         if result.status == 'imported' and DELETE_AFTER_IMPORT and not DRY_RUN:

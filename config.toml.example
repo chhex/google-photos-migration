@@ -28,3 +28,11 @@ image = [".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"]
 
 # Supported video file extensions
 video = [".mp4", ".mov", ".avi", ".mkv", ".m4v"]
+
+
+[monitoring]
+max_photos_memory_gb = 2.0
+max_errors_per_interval = 5
+health_check_interval = 50
+# Optionen: "restart", "terminate", "manual"
+on_health_failure = "terminate"

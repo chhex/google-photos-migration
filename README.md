@@ -149,6 +149,50 @@ google-photos-migration/
         └── migrate.py      # Main migration script
 ```
 
+## Health Monitoring
+
+Das Skript überwacht Apple Photos während des Imports, da Photos bei grossen Batch-Imports instabil werden kann (hoher Memory-Verbrauch, undefinierte Fehler).
+
+### Was wird überwacht
+
+| Check | Beschreibung |
+|-------|--------------|
+| **Memory** | RAM-Verbrauch des Photos-Prozesses (via `psutil`) |
+| **Error Logs** | Fehler des `photolibraryd` Daemon (via `log show`) |
+
+### Konfiguration
+
+```toml
+[monitoring]
+max_photos_memory_gb = 3.0       # Max Memory bevor Aktion ausgelöst wird
+max_errors_per_interval = 5      # Max Fehler in den letzten 5 Minuten
+health_check_interval = 50       # Prüfung alle X Dateien
+
+# Reaktion bei Health-Problemen:
+#   "restart"   - Photos automatisch neustarten
+#   "terminate" - Skript abbrechen mit Hinweis
+#   "manual"    - Benutzer fragen
+on_health_failure = "terminate"
+```
+
+### Empfehlungen
+
+- **Für unbeaufsichtigte Imports (über Nacht):** `on_health_failure = "restart"`
+- **Für kontrollierte Imports:** `on_health_failure = "terminate"` oder `"manual"`
+- Bei sehr grossen Imports (10k+ Fotos): Photos zwischendurch manuell neustarten hilft oft
+
+### Troubleshooting
+
+Falls Photos häufig Probleme macht:
+
+```bash
+# Photos Error Logs manuell prüfen
+log show --predicate 'process == "photolibraryd"' --start "2026-01-20 01:00:00" --style compact | grep -iE "(error|fault|fail)"
+
+# Referenzierte Fotos mit fehlendem Original finden
+osxphotos query --is-reference --print "{original_filename} | {path}" | grep "None"
+```
+
 ## Disk Space Requirements
 
 You'll need approximately:
@@ -158,6 +202,7 @@ You'll need approximately:
 - Total: ~2x your Google Photos library size
 
 ## Troubleshooting
+
 
 ### "osxphotos not found"
 
