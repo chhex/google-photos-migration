@@ -140,7 +140,7 @@ def get_photos_errors(since_minutes: int = 5) -> int:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     
     error_lines = [l for l in result.stdout.split('\n') 
-                   if ' E ' in l or ' F ' in l or 'error' in l.lower() or 'fail' in l.lower()]
+                   if ' E  photolibraryd' in l]
     
     return len(error_lines)
 
@@ -532,14 +532,14 @@ def process_all_albums():
 # PHASE 3: IMPORT IN APPLE PHOTOS (MIT VERBESSERTER FEHLERBEHANDLUNG)
 # =============================================================================
 
-def import_album_to_photos(album_dir: Path, stats: ImportStats) -> None:
+def import_album_to_photos(album_dir: Path, stats: ImportStats) -> bool:
     album_name = sanitize_album_name(album_dir.name)
     
     media_files = [f for f in album_dir.iterdir() 
                    if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS]
     
     if not media_files:
-        return
+        return True  # Nichts zu importieren
     
     log(f"  Importiere {len(media_files)} Dateien in Album '{album_name}'...")
 
@@ -556,7 +556,7 @@ def import_album_to_photos(album_dir: Path, stats: ImportStats) -> None:
             if not is_healthy:
                 action = config["monitoring"]["on_health_failure"]
                 if not handle_health_failure(reason, action):
-                    return  # Import abbrechen
+                    return False  # Import abbrechen
         
         result = import_single_file(media_file, album_name)
         stats.add_result(result)
@@ -580,7 +580,7 @@ def import_album_to_photos(album_dir: Path, stats: ImportStats) -> None:
                 log(f"    {media_file.name} (Duplikat) gelöscht", "DEL")
             except Exception as e:
                 log(f"    Konnte {media_file.name} nicht löschen: {e}", "WARN")
-
+    return True
 
 def import_single_file(filepath: Path, album_name: str) -> ImportResult:
     """
@@ -672,8 +672,11 @@ def import_to_apple_photos():
         album_name = album_dir.name
         log(f"[{i}/{len(album_dirs)}] Album: {album_name}")
         
-        import_album_to_photos(album_dir, stats)
-        
+        if not import_album_to_photos(album_dir, stats):
+            log("Import abgebrochen aufgrund von Health-Check Fehlern", "ERR")
+            break
+
+
         # Zwischenstand alle 10 Alben
         if i % 10 == 0:
             log(f"  Zwischenstand: {stats.summary()}", "INFO")
