@@ -34,7 +34,7 @@ During the import with [osxphotos](https://github.com/RhetTbull/osxphotos), Appl
 
 The option for copying items into the Apple Photos library must be enabled.
 
-After longer batch runs it may be necessary to restart Apple Photos, otherwise unexpected errors may occur.
+After longer batch runs it may be necessary to restart Apple Photos, otherwise unexpected errors may occur, see Healt Monitoring.
 
 ### Platform
 
@@ -151,16 +151,16 @@ google-photos-migration/
 
 ## Health Monitoring
 
-Das Skript überwacht Apple Photos während des Imports, da Photos bei grossen Batch-Imports instabil werden kann (hoher Memory-Verbrauch, undefinierte Fehler).
+The script monitors Apple Photos during the import process, as Photos can become unstable during large batch imports (high memory consumption, undefined errors).
 
-### Was wird überwacht
+### Was is checked
 
-| Check | Beschreibung |
+| Check | Description  |
 |-------|--------------|
-| **Memory** | RAM-Verbrauch des Photos-Prozesses (via `psutil`) |
-| **Error Logs** | Fehler des `photolibraryd` Daemon (via `log show`) |
+| **Memory** | RAM-Usage of the Photo App (with `psutil`)                |
+| **Error Logs** | Errors of the `photolibraryd` Daemon (via `log show`) |
 
-### Konfiguration
+### Configuration
 
 ```toml
 [monitoring]
@@ -175,15 +175,12 @@ health_check_interval = 50       # Prüfung alle X Dateien
 on_health_failure = "terminate"
 ```
 
-### Empfehlungen
+### Recommendations
 
-- **Für unbeaufsichtigte Imports (über Nacht):** `on_health_failure = "restart"`
-- **Für kontrollierte Imports:** `on_health_failure = "terminate"` oder `"manual"`
-- Bei sehr grossen Imports (10k+ Fotos): Photos zwischendurch manuell neustarten hilft oft
+- **For unattended Imports:** `on_health_failure = "restart"`
+- **For attend Imports:** `on_health_failure = "terminate"` oder `"manual"`
 
 ### Troubleshooting
-
-Falls Photos häufig Probleme macht:
 
 ```bash
 # Photos Error Logs manuell prüfen
